@@ -1,5 +1,5 @@
 // -*- mode: java; c-basic-offset: 2; -*-
-// Copyright 2018 MIT, All rights reserved
+// Copyright 2018-2020 MIT, All rights reserved
 // Released under the Apache License, Version 2.0
 // http://www.apache.org/licenses/LICENSE-2.0
 
@@ -8,22 +8,33 @@ package com.google.appinventor.components.runtime;
 import android.app.Activity;
 import android.content.res.Configuration;
 import android.graphics.drawable.ColorDrawable;
+import android.os.Build;
 import android.os.Bundle;
-import android.support.annotation.Nullable;
-import android.support.v7.app.ActionBar;
-import android.support.v7.app.AppCompatCallback;
-import android.support.v7.app.AppCompatDelegate;
-import android.support.v7.view.ActionMode;
-import android.support.v7.view.ActionMode.Callback;
 import android.util.Log;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
+import android.view.WindowManager;
 import android.widget.FrameLayout.LayoutParams;
 import android.widget.TextView;
+import androidx.annotation.Nullable;
+import androidx.appcompat.app.ActionBar;
+import androidx.appcompat.app.AppCompatCallback;
+import androidx.appcompat.app.AppCompatDelegate;
+import androidx.appcompat.view.ActionMode;
+import androidx.appcompat.view.ActionMode.Callback;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
 import com.google.appinventor.components.common.ComponentConstants;
 import com.google.appinventor.components.runtime.util.PaintUtil;
+import com.google.appinventor.components.runtime.util.SdkLevel;
+import com.google.appinventor.components.runtime.util.theme.ClassicThemeHelper;
+import com.google.appinventor.components.runtime.util.theme.HoneycombThemeHelper;
+import com.google.appinventor.components.runtime.util.theme.IceCreamSandwichThemeHelper;
+import com.google.appinventor.components.runtime.util.theme.ThemeHelper;
 
 /**
  * AppInventorCompatActivity provides a base implementation of Activity that handles the styling of
@@ -43,35 +54,66 @@ public class AppInventorCompatActivity extends Activity implements AppCompatCall
   }
 
   private static final String LOG_TAG = AppInventorCompatActivity.class.getSimpleName();
-  static final int DEFAULT_PRIMARY_COLOR = PaintUtil.hexStringToInt(ComponentConstants.DEFAULT_PRIMARY_COLOR);
-  private static boolean classicMode;
+  static final int DEFAULT_PRIMARY_COLOR =
+      PaintUtil.hexStringToInt(ComponentConstants.DEFAULT_PRIMARY_COLOR);
+  private static boolean classicMode = false;
   private static boolean actionBarEnabled;
   private static Theme currentTheme = Theme.PACKAGED;
   private static int primaryColor;
   private AppCompatDelegate appCompatDelegate;
   android.widget.LinearLayout frameWithTitle;
   TextView titleBar;
+  private static boolean didSetClassicModeFromYail = false;
+  @SuppressWarnings("WeakerAccess")  // Potentially useful to extensions with custom activities
+  protected ThemeHelper themeHelper;
 
   @Override
   public void onCreate(Bundle icicle) {
-    if (currentTheme != Theme.PACKAGED) {
-      applyTheme();
-    }
-    Window.Callback classicCallback = getWindow().getCallback();
-    appCompatDelegate = AppCompatDelegate.create(this, this);
-    try {
+    classicMode = classicMode || SdkLevel.getLevel() < SdkLevel.LEVEL_HONEYCOMB;
+    if (classicMode) {
+      themeHelper = new ClassicThemeHelper();
+    } else if (SdkLevel.getLevel() < SdkLevel.LEVEL_ICE_CREAM_SANDWICH) {
+      // On Honeycomb, so requesting the ActionBar
+      themeHelper = new HoneycombThemeHelper(this);
+      themeHelper.requestActionBar();
+      actionBarEnabled = true;
+    } else {
+      // AppCompat libraries require minSdk 14 (Ice Cream Sandwich). Therefore, we only need to
+      // run this code if we are on Ice Cream Sandwich or higher and in a newer (i.e., non-Classic)
+      // theme.
+      themeHelper = new IceCreamSandwichThemeHelper(this);
+      if (currentTheme != Theme.PACKAGED) {
+        applyTheme();
+      }
+      appCompatDelegate = AppCompatDelegate.create(this, this);
       appCompatDelegate.onCreate(icicle);
-    } catch (IllegalStateException e) {
-      // Thrown in "Classic" mode
-      appCompatDelegate = null;
-      AppInventorCompatActivity.classicMode = true;
-      getWindow().setCallback(classicCallback);
     }
 
     super.onCreate(icicle);
 
     frameWithTitle = new android.widget.LinearLayout(this);
     frameWithTitle.setOrientation(android.widget.LinearLayout.VERTICAL);
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+      // SDK 35 (Vanilla Ice Cream) mandates edge-to-edge display, which means that we need
+      // to calculate insets to avoid any part of the app displaying under the status bar.
+      ViewCompat.setOnApplyWindowInsetsListener(getWindow().getDecorView(), (v, windowInsets) -> {
+        Insets insets = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars());
+        Insets ime = windowInsets.getInsets(WindowInsetsCompat.Type.ime());
+        v.setPadding(insets.left, insets.top, insets.right, insets.bottom + ime.bottom);
+
+        if (this instanceof Form) {
+          ((Form)this).ReplayFormOrientation();
+        }
+
+        // Return CONSUMED if you don't want the window insets to keep passing
+        // down to descendant views.
+        return WindowInsetsCompat.CONSUMED;
+      });
+    }
+    setContentView(frameWithTitle);  // Due to a bug in Honeycomb 3.0 and 3.1, a content view must
+                                     // exist before attempting to check the ActionBar status,
+                                     // which is done indirectly via shouldCreateTitleBar()
+    actionBarEnabled = themeHelper.hasActionBar();
     titleBar = (TextView) findViewById(android.R.id.title);
     if (shouldCreateTitleBar()) {
       titleBar = new TextView(this);
@@ -80,14 +122,20 @@ public class AppInventorCompatActivity extends Activity implements AppCompatCall
       titleBar.setGravity(Gravity.CENTER_VERTICAL);
       titleBar.setSingleLine();
       titleBar.setShadowLayer(2, 0, 0, 0xBB000000);
-      if (!isClassicMode()) {
+      if (!isClassicMode() || SdkLevel.getLevel() < SdkLevel.LEVEL_HONEYCOMB) {
+        // Since AppCompat requires SDK 14 or higher, all apps prior to that will receive the
+        // "classic" theme. However, if the app has a different theme then we will end up without
+        // a title bar even though isClassicMode() will return true. Here we add the title bar
+        // if we are the REPL and not in classic mode (so we can simulate Classic title bar) or
+        // on an older device regardless of theme.
         frameWithTitle.addView(titleBar, new ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT
         ));
       }
+    } else {
+      Log.d(LOG_TAG, "Already have a title bar (classic mode): " + titleBar);
     }
-    setContentView(frameWithTitle);
   }
 
   @SuppressWarnings("WeakerAccess")
@@ -140,8 +188,7 @@ public class AppInventorCompatActivity extends Activity implements AppCompatCall
     super.onTitleChanged(title, color);
     if (appCompatDelegate != null) {
       appCompatDelegate.setTitle(title);
-    }
-    if (isAppCompatMode() && titleBar != null) {
+    } else if (titleBar != null) {
       titleBar.setText(title);
     }
   }
@@ -181,7 +228,22 @@ public class AppInventorCompatActivity extends Activity implements AppCompatCall
 
   @SuppressWarnings("WeakerAccess")  // To maintain visibility compatibility with AppCompatActivity
   public ActionBar getSupportActionBar() {
-    return appCompatDelegate == null ? null : appCompatDelegate.getSupportActionBar();
+    Window.Callback classicCallback = getWindow().getCallback();
+    try {
+      return appCompatDelegate == null ? null : appCompatDelegate.getSupportActionBar();
+    } catch (IllegalStateException e) {
+      // Thrown in "Classic" mode
+      appCompatDelegate = null;
+      AppInventorCompatActivity.classicMode = true;
+      getWindow().setCallback(classicCallback);
+      return null;
+    }
+  }
+
+  public static boolean isEmulator() {
+     return android.os.Build.PRODUCT.contains("google_sdk") ||  // Old emulator build (2.x)
+         android.os.Build.PRODUCT.equals("sdk") ||              // Honeycomb image (for testing)
+         android.os.Build.PRODUCT.contains("sdk_gphone");       // New emulator build (3.x)
   }
 
   @SuppressWarnings("unused") // Potentially useful for extensions adding custom activities
@@ -201,7 +263,7 @@ public class AppInventorCompatActivity extends Activity implements AppCompatCall
 
   @SuppressWarnings("WeakerAccess")
   protected void setClassicMode(boolean classic) {
-    if (isRepl()) {  // Only allow changes in REPL
+    if (isRepl() && SdkLevel.getLevel() >= SdkLevel.LEVEL_HONEYCOMB) {  // Only allow changes in REPL when running on a supported SDK level
       classicMode = classic;
     }
   }
@@ -218,10 +280,19 @@ public class AppInventorCompatActivity extends Activity implements AppCompatCall
       // Only make the change if we have to...
       primaryColor = newColor;
       actionBar.setBackgroundDrawable(new ColorDrawable(color));
+      if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+        // Sets the color of the status bar in end-to-end display
+        getWindow().getDecorView().setBackgroundColor(primaryColor);
+      }
     }
   }
 
-  protected boolean isRepl() {
+  /**
+   * Checks whether the activity is the REPL.
+   *
+   * @return true if the activity is the REPL, otherwise false
+   */
+  public boolean isRepl() {
     return false;
   }
 
@@ -229,7 +300,9 @@ public class AppInventorCompatActivity extends Activity implements AppCompatCall
   protected void hideTitleBar() {
     if (titleBar != null) {
       if (titleBar.getParent() != frameWithTitle) {
-        ((View)titleBar.getParent()).setVisibility(View.GONE);
+        if (titleBar.getParent() != null) {
+          ((View)titleBar.getParent()).setVisibility(View.GONE);
+        }
       } else {
         titleBar.setVisibility(View.GONE);
       }
@@ -237,7 +310,6 @@ public class AppInventorCompatActivity extends Activity implements AppCompatCall
   }
 
   protected void maybeShowTitleBar() {
-    Log.d(LOG_TAG, "maybeShowTitleBar");
     if (titleBar != null) {
       titleBar.setVisibility(View.VISIBLE);
       Log.d(LOG_TAG, "titleBar visible");
@@ -269,7 +341,9 @@ public class AppInventorCompatActivity extends Activity implements AppCompatCall
 
   @SuppressWarnings("WeakerAccess")
   protected void setAppInventorTheme(Theme theme) {
-    if (!Form.getActiveForm().isRepl()) return;  // Theme changing only allowed in REPL
+    if (!Form.getActiveForm().isRepl()) {
+      return;  // Theme changing only allowed in REPL
+    }
     if (theme == currentTheme) {
       return;
     }
@@ -284,23 +358,43 @@ public class AppInventorCompatActivity extends Activity implements AppCompatCall
       case CLASSIC:
         setClassicMode(true);
         setTheme(android.R.style.Theme);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+          // tells the status bar whether to contrast with a light or dark color
+          // in end-to-end display.
+          WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView()).setAppearanceLightStatusBars(false);
+        }
         break;
       case DEVICE_DEFAULT:
       case BLACK_TITLE_TEXT:
         setTheme(android.R.style.Theme_DeviceDefault_Light_NoActionBar);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+          WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView()).setAppearanceLightStatusBars(true);
+        }
         break;
       case DARK:
         setTheme(android.R.style.Theme_DeviceDefault_NoActionBar);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+          WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView()).setAppearanceLightStatusBars(false);
+        }
         break;
     }
   }
 
   private boolean shouldCreateTitleBar() {
-    if (isAppCompatMode() && (getSupportActionBar() == null || !isActionBarEnabled())) {
+    if (isAppCompatMode() && (!themeHelper.hasActionBar() || !isActionBarEnabled())) {
       return true;
-    } else if (titleBar == null && isRepl()) {
+    } else if (titleBar == null && (isRepl() || classicMode)) {
       return true;
     }
     return false;
+  }
+
+  @SuppressWarnings("unused")  // Called from YAIL
+  public static void setClassicModeFromYail(boolean newClassicMode) {
+    if (!didSetClassicModeFromYail) {  // Check so we only do this once (from Screen1)
+      Log.d(LOG_TAG, "Setting classic mode from YAIL: " + newClassicMode);
+      classicMode = newClassicMode;
+      didSetClassicModeFromYail = true;
+    }
   }
 }

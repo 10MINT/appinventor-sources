@@ -1,18 +1,22 @@
 // -*- mode: java; c-basic-offset: 2; -*-
-// Copyright 2009-2011 Google, All Rights reserved
-// Copyright 2011-2013 MIT, All rights reserved
+// Copyright 2013-2018 MIT, All rights reserved
 // Released under the Apache License, Version 2.0
 // http://www.apache.org/licenses/LICENSE-2.0
 // This work is licensed under a Creative Commons Attribution 3.0 Unported License.
 
 package com.google.appinventor.components.runtime.util;
+
+import android.util.Log;
+
+import com.google.appinventor.components.runtime.PhoneStatus;
+import com.google.appinventor.components.runtime.ReplForm;
+
 import java.util.ArrayList;
+
 import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
-import org.json.JSONTokener;
 
-import android.util.Log;
 
 /*
  * A Class for managing return values from evaluating Repl Forms and
@@ -58,7 +62,32 @@ public class RetValManager {
       }
       boolean sendNotify = currentArray.isEmpty();
       currentArray.add(retval);
-      if (sendNotify) {
+      if (PhoneStatus.getUseWebRTC()) {
+        webRTCsendCurrent();
+      } else if (sendNotify) {
+        semaphore.notifyAll();
+      }
+    }
+  }
+
+  public static void appendLogValue(String item, String blockid, String status, String level) {
+    synchronized(semaphore) {
+      JSONObject retval = new JSONObject();
+      try {
+        retval.put("status", status);
+        retval.put("type", "log");
+        retval.put("item", item);
+        retval.put("blockid", blockid);
+        retval.put("level", level);
+      } catch (JSONException e) {
+        Log.e(LOG_TAG, "Error building retval", e);
+        return;
+      }
+      boolean sendNotify = currentArray.isEmpty();
+      currentArray.add(retval);
+      if (PhoneStatus.getUseWebRTC()) {
+        webRTCsendCurrent();
+      } else if (sendNotify) {
         semaphore.notifyAll();
       }
     }
@@ -77,7 +106,9 @@ public class RetValManager {
       }
       boolean sendNotify = currentArray.isEmpty();
       currentArray.add(retval);
-      if (sendNotify) {
+      if (PhoneStatus.getUseWebRTC()) {
+        webRTCsendCurrent();
+      } else if (sendNotify) {
         semaphore.notifyAll();
       }
     }
@@ -104,7 +135,9 @@ public class RetValManager {
       }
       boolean sendNotify = currentArray.isEmpty();
       currentArray.add(retval);
-      if (sendNotify) {
+      if (PhoneStatus.getUseWebRTC()) {
+        webRTCsendCurrent();
+      } else if (sendNotify) {
         semaphore.notifyAll();
       }
     }
@@ -130,7 +163,84 @@ public class RetValManager {
       }
       boolean sendNotify = currentArray.isEmpty();
       currentArray.add(retval);
-      if (sendNotify) {
+      if (PhoneStatus.getUseWebRTC()) {
+        webRTCsendCurrent();
+      } else if (sendNotify) {
+        semaphore.notifyAll();
+      }
+    }
+  }
+
+  /*
+   * assetTransferred
+   *
+   * @param name name of the asset transferred
+   */
+  public static void assetTransferred(String name) {
+    synchronized (semaphore) {
+      JSONObject retval = new JSONObject();
+      try {
+        retval.put("status", "OK");
+        retval.put("type", "assetTransferred");
+        if (name != null)
+          retval.put("value", name.toString());
+      } catch (JSONException e) {
+        Log.e(LOG_TAG, "Error building retval", e);
+        return;
+      }
+      boolean sendNotify = currentArray.isEmpty();
+      currentArray.add(retval);
+      if (PhoneStatus.getUseWebRTC()) {
+        webRTCsendCurrent();
+      } else if (sendNotify) {
+        semaphore.notifyAll();
+      }
+    }
+  }
+
+  /*
+   * extensionsLoaded
+   *
+   */
+  public static void extensionsLoaded() {
+    synchronized (semaphore) {
+      JSONObject retval = new JSONObject();
+      try {
+        retval.put("status", "OK");
+        retval.put("type", "extensionsLoaded");
+      } catch (JSONException e) {
+        Log.e(LOG_TAG, "Error building retval", e);
+        return;
+      }
+      boolean sendNotify = currentArray.isEmpty();
+      currentArray.add(retval);
+      if (PhoneStatus.getUseWebRTC()) {
+        webRTCsendCurrent();
+      } else if (sendNotify) {
+        semaphore.notifyAll();
+      }
+    }
+  }
+
+  /*
+   * Start the process of loading and saving a project locally
+   * (AppLibrary)
+   */
+  public static void startCache() {
+    synchronized (semaphore) {
+      JSONObject retval = new JSONObject();
+      try {
+        retval.put("status", "OK");
+        retval.put("type", "startCache");
+      } catch (JSONException e) {
+        Log.e(LOG_TAG, "Error building retval", e);
+        return;
+      }
+      boolean sendNotify = currentArray.isEmpty();
+      currentArray.add(retval);
+      if (PhoneStatus.getUseWebRTC()) {
+        webRTCsendCurrent();
+      } else if (sendNotify) {
         semaphore.notifyAll();
       }
     }
@@ -138,6 +248,8 @@ public class RetValManager {
 
   /*
    * fetch -- Fetch all pending results as a JSON encoded array.
+   *
+   * NOTE: This code is not used when we are using webrtc
    *
    * @param block true if we should block waiting for results
    * @return String The JSON encoded array.
@@ -166,6 +278,21 @@ public class RetValManager {
       currentArray.clear();       // empty it out
       return output.toString();
     }
+  }
+
+  // Only used for webrtc. Note: Our caller is holding "semphore" so we don't
+  // need to worry about multi-thread synchonization here
+  private static void webRTCsendCurrent() {
+    try {
+      JSONObject output = new JSONObject();
+      output.put("status", "OK");
+      output.put("values", new JSONArray(currentArray));
+      ReplForm.returnRetvals(output.toString());
+    } catch (JSONException e) {
+      Log.e(LOG_TAG, "Error building retval", e);
+      return;
+    }
+    currentArray.clear();
   }
 
 }

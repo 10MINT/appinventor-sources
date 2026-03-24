@@ -4,7 +4,6 @@
 // http://www.apache.org/licenses/LICENSE-2.0
 
 package com.google.appinventor.client.editor.simple.palette;
-
 import com.google.gwt.event.dom.client.ClickEvent;
 import com.google.gwt.event.dom.client.ClickHandler;
 import com.google.gwt.event.dom.client.TouchEndEvent;
@@ -27,6 +26,11 @@ public abstract class AbstractPaletteItemWidget extends Image {
 
     AbstractImagePrototype.create(image).applyTo(this);
     this.addStyleName("ode-SimplePaletteItem-button");
+
+    String altText = getAltText();
+    if (altText != null && !altText.isEmpty()) {
+      getElement().setAttribute("alt", altText);
+    }
 
     addClickHandler(new ClickHandler() {
       @Override
@@ -53,4 +57,11 @@ public abstract class AbstractPaletteItemWidget extends Image {
    * Handles when the user clicks (or taps) on the button.
    */
   protected abstract void handleClick();
+
+  /**
+   * Returns the alternative text for this button's image (for screen readers).
+   *
+   * @return The alt text string for this button
+   */
+  public abstract String getAltText();
 }

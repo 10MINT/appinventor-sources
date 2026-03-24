@@ -7,31 +7,37 @@ package com.google.appinventor.client.editor.simple.components;
 
 import static com.google.appinventor.client.Ode.MESSAGES;
 
-import java.util.HashSet;
-import java.util.Set;
-
 import com.google.appinventor.client.ErrorReporter;
-import com.google.appinventor.client.Ode;
 import com.google.appinventor.client.editor.simple.SimpleEditor;
 import com.google.appinventor.client.editor.simple.palette.SimplePaletteItem;
 import com.google.appinventor.client.widgets.dnd.DragSource;
 import com.google.appinventor.components.common.ComponentConstants;
+import com.google.common.collect.Sets;
 import com.google.gwt.core.client.JavaScriptObject;
 import com.google.gwt.event.logical.shared.AttachEvent;
 import com.google.gwt.user.client.Event;
 import com.google.gwt.user.client.ui.AbsolutePanel;
+import com.google.gwt.user.client.ui.Image;
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
 
 public final class MockMap extends MockContainer {
   public static final String TYPE = "Map";
+  public static final Set<String> ACCEPTABLE_TYPES = Collections.unmodifiableSet(Sets.newHashSet(MockMarker.TYPE, MockLineString.TYPE, MockPolygon.TYPE, MockRectangle.TYPE, MockCircle.TYPE, MockFeatureCollection.TYPE));
   protected static final String PROPERTY_NAME_LATITUDE = "Latitude";
   protected static final String PROPERTY_NAME_LONGITUDE = "Longitude";
   protected static final String PROPERTY_NAME_MAP_TYPE = "MapType";
+  protected static final String PROPERTY_NAME_CUSTOM_URL = "CustomUrl";
   protected static final String PROPERTY_NAME_CENTER_FROM_STRING = "CenterFromString";
   protected static final String PROPERTY_NAME_ZOOM_LEVEL = "ZoomLevel";
   protected static final String PROPERTY_NAME_SHOW_COMPASS = "ShowCompass";
   protected static final String PROPERTY_NAME_SHOW_ZOOM = "ShowZoom";
   protected static final String PROPERTY_NAME_SHOW_USER = "ShowUser";
   protected static final String PROPERTY_NAME_ENABLE_ROTATION = "EnableRotation";
+  protected static final String PROPERTY_NAME_SHOW_SCALE = "ShowScale";
+  protected static final String PROPERTY_NAME_SCALE_UNITS = "ScaleUnits";
 
   /**
    * The Widget wrapping the element where the map tiles will be rendered.
@@ -66,6 +72,8 @@ public final class MockMap extends MockContainer {
   private boolean zoomControl = false;
   private boolean compassEnabled = false;
   private boolean userLocationEnabled = false;
+  private boolean showScale = false;
+  private int scaleUnits = 1;
 
   public MockMap(SimpleEditor editor) {
     super(editor, TYPE, images.map(), new MockMapLayout());
@@ -90,6 +98,16 @@ public final class MockMap extends MockContainer {
         }
       }
     });
+  }
+
+  @Override
+  public void collectTypesAndIcons(Map<String, String> typesAndIcons) {
+    super.collectTypesAndIcons(typesAndIcons);
+    // These types can be loaded dynamically using LoadFromURL, so we want to show
+    // generic options even though the user might not have explicitly created one
+    typesAndIcons.put("Marker", new Image(images.marker()).getElement().getString());
+    typesAndIcons.put("LineString", new Image(images.linestring()).getElement().getString());
+    typesAndIcons.put("Polygon", new Image(images.polygon()).getElement().getString());
   }
 
   public void addEventListener(MockMapEventListener listener) {
@@ -130,6 +148,11 @@ public final class MockMap extends MockContainer {
     return component instanceof MockMapFeature;
   }
 
+  @Override
+  public boolean willAcceptComponentType(String type) {
+    return ACCEPTABLE_TYPES.contains(type);
+  }
+
   private void setBackgroundColorProperty(String text) {
     if (MockComponentsUtil.isDefaultColor(text)) {
       text = "&HFFFFFFFF";
@@ -159,6 +182,8 @@ public final class MockMap extends MockContainer {
       invalidateMap();
     } else if (propertyName.equals(PROPERTY_NAME_MAP_TYPE)) {
       setMapType(newValue);
+    } else if (propertyName.equals(PROPERTY_NAME_CUSTOM_URL)) {
+      setCustomUrl(newValue);
     } else if (propertyName.equals(PROPERTY_NAME_CENTER_FROM_STRING)) {
       setCenter(newValue);
     } else if (propertyName.equals(PROPERTY_NAME_ZOOM_LEVEL)) {
@@ -169,6 +194,10 @@ public final class MockMap extends MockContainer {
       setShowUser(newValue);
     } else if (propertyName.equals(PROPERTY_NAME_SHOW_ZOOM)) {
       setShowZoom(newValue);
+    } else if (propertyName.equals(PROPERTY_NAME_SHOW_SCALE)) {
+      setShowScale(newValue);
+    } else if (propertyName.equals(PROPERTY_NAME_SCALE_UNITS)) {
+      setScaleUnits(newValue);
     }
   }
 
@@ -194,6 +223,10 @@ public final class MockMap extends MockContainer {
       ErrorReporter.reportError(MESSAGES.unknownMapTypeException(tileLayerId));
       changeProperty(PROPERTY_NAME_MAP_TYPE, Integer.toString(selectedTileLayer));
     }
+  }
+
+  private void setCustomUrl(String newCustomUrl) {
+    updateCustomUrl(newCustomUrl);
   }
 
   private void setCenter(String center) {
@@ -232,6 +265,22 @@ public final class MockMap extends MockContainer {
   private void setShowZoom(String state) {
     this.zoomControl = Boolean.parseBoolean(state);
     updateMapZoomControl(this.zoomControl);
+  }
+
+  private void setShowScale(String state) {
+    this.showScale = Boolean.parseBoolean(state);
+    updateMapShowScale(this.showScale);
+  }
+
+  private void setScaleUnits(String state) {
+    if (state.equals("1")) {
+      this.scaleUnits = 1;
+    } else if (state.equals("2")) {
+      this.scaleUnits = 2;
+    } else {
+      throw new IllegalArgumentException("Unexpected value for scale: " + state);
+    }
+    updateScaleUnits(this.scaleUnits);
   }
 
   // event handlers
@@ -384,7 +433,7 @@ public final class MockMap extends MockContainer {
         onAdd: function () {
           var container = L.DomUtil.create('div', 'compass-control'),
               img = L.DomUtil.create('img');
-          img.setAttribute('src', '/leaflet/assets/compass.svg');
+          img.setAttribute('src', '/static/leaflet/assets/compass.svg');
           container.appendChild(img);
           return container;
         }
@@ -398,7 +447,7 @@ public final class MockMap extends MockContainer {
           this._el = L.DomUtil.create('div', 'ai2-user-mock-location leaflet-zoom-hide');
           var img = L.DomUtil.create('img');
           this._el.appendChild(img);
-          img.setAttribute('src', '/leaflet/assets/location.png');
+          img.setAttribute('src', '/static/leaflet/assets/location.png');
           map.getPanes()['overlayPane'].appendChild(this._el);
           map.on('viewreset', this._reposition, this);
           this._reposition();
@@ -434,15 +483,18 @@ public final class MockMap extends MockContainer {
     var L = $wnd.top.L;
     var tileLayers = [
       null,  // because AppInventor is 1-indexed, we leave element 0 as null
-      L.tileLayer('http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+      L.tileLayer('//{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
                   {minZoom: 0, maxZoom: 18,
                    attribution: 'Map data &copy; <a href="http://openstreetmap.org">OpenStreetMap</a> contributors'}),
-      L.tileLayer('http://basemap.nationalmap.gov/arcgis/rest/services/USGSImageryTopo/MapServer/tile/{z}/{y}/{x}',
+      L.tileLayer('//basemap.nationalmap.gov/arcgis/rest/services/USGSImageryTopo/MapServer/tile/{z}/{y}/{x}',
                   {minZoom: 0, maxZoom: 15,
                    attribution: 'Satellite imagery &copy; <a href="http://mapquest.com">USGS</a>'}),
-      L.tileLayer('http://basemap.nationalmap.gov/ArcGIS/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}',
+      L.tileLayer('//basemap.nationalmap.gov/ArcGIS/rest/services/USGSTopo/MapServer/tile/{z}/{y}/{x}',
                   {minZoom: 0, maxZoom: 15,
-                   attribution: 'Map data &copy; <a href="http://www.usgs.gov">USGS</a>'})
+                   attribution: 'Map data &copy; <a href="http://www.usgs.gov">USGS</a>'}),
+      L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                  {minZoom: 0, maxZoom: 18,
+                   attribution: 'Custom map'})
     ];
     this.@com.google.appinventor.client.editor.simple.components.MockMap::tileLayers = tileLayers;
     this.@com.google.appinventor.client.editor.simple.components.MockMap::baseLayer =
@@ -459,7 +511,9 @@ public final class MockMap extends MockContainer {
       var latitude = this.@com.google.appinventor.client.editor.simple.components.MockMap::latitude,
           longitude = this.@com.google.appinventor.client.editor.simple.components.MockMap::longitude,
           zoomControl = this.@com.google.appinventor.client.editor.simple.components.MockMap::zoomControl,
-          zoom = this.@com.google.appinventor.client.editor.simple.components.MockMap::zoomLevel;
+          zoom = this.@com.google.appinventor.client.editor.simple.components.MockMap::zoomLevel,
+          showScale = this.@com.google.appinventor.client.editor.simple.components.MockMap::showScale,
+          scaleUnits = this.@com.google.appinventor.client.editor.simple.components.MockMap::scaleUnits;
       map = L.map(elem, {zoomControl: false, editable: true}).setView([latitude, longitude], zoom);
       var messages = @com.google.appinventor.client.Ode::getMessages()();
       map.zoomControl = L.control.zoom({
@@ -469,6 +523,15 @@ public final class MockMap extends MockContainer {
       });
       if (zoomControl) {
         map.zoomControl.addTo(map);
+      }
+      var scaleOptions = {metric: true, imperial: false, position: 'bottomright'};
+      if (scaleUnits == 2) {
+        scaleOptions.metric = false;
+        scaleOptions.imperial = true;
+      }
+      map.scaleControl = L.control.scale(scaleOptions);
+      if (showScale) {
+        map.scaleControl.addTo(map);
       }
       map.owner = this;
       map.unlocked = true;
@@ -491,7 +554,7 @@ public final class MockMap extends MockContainer {
             // This is not desirable because it causes issues with the selected component.
             return;
           } else if (el === background) {
-            this.owner.@com.google.appinventor.client.editor.simple.components.MockComponent::select()();
+            this.owner.@com.google.appinventor.client.editor.simple.components.MockComponent::select(*)(e);
             return;
           }
           el = el.parentNode;
@@ -553,6 +616,23 @@ public final class MockMap extends MockContainer {
     }
   }-*/;
 
+  private native void updateCustomUrl(String customUrl)/*-{
+    var L = $wnd.top.L;
+    var map = this.@com.google.appinventor.client.editor.simple.components.MockMap::mapInstance;
+    var tileLayers = this.@com.google.appinventor.client.editor.simple.components.MockMap::tileLayers;
+    var baseLayer = this.@com.google.appinventor.client.editor.simple.components.MockMap::baseLayer;
+    if (map && baseLayer && tileLayers) {
+      tileLayers[4] = L.tileLayer(customUrl,
+                  {minZoom: 0, maxZoom: 18,
+                   attribution: 'Custom map data'});
+      map.removeLayer(baseLayer);
+      baseLayer = tileLayers[4];
+      map.addLayer(baseLayer);
+      baseLayer.bringToBack();
+      this.@com.google.appinventor.client.editor.simple.components.MockMap::tileLayers = tileLayers;
+    }
+  }-*/;
+
   native LatLng projectFromXY(int x, int y)/*-{
     var map = this.@com.google.appinventor.client.editor.simple.components.MockMap::mapInstance;
     if (map) {
@@ -600,6 +680,38 @@ public final class MockMap extends MockContainer {
         map.zoomControl.addTo(map);
       } else {
         map.removeControl(map.zoomControl);
+      }
+    }
+  }-*/;
+
+  private native void updateMapShowScale(boolean enable)/*-{
+    var map = this.@com.google.appinventor.client.editor.simple.components.MockMap::mapInstance;
+    if (map) {
+      if (!map.scaleControl) {
+        map.scaleControl = $wnd.top.L.control.scale({position: 'topleft'});
+      }
+      if (enable) {
+        map.scaleControl.addTo(map);
+      } else {
+        map.removeControl(map.scaleControl);
+      }
+    }
+  }-*/;
+
+  private native void updateScaleUnits(int units)/*-{
+    var map = this.@com.google.appinventor.client.editor.simple.components.MockMap::mapInstance,
+      scaleVisible = this.@com.google.appinventor.client.editor.simple.components.MockMap::showScale;
+    if (map) {
+      if (scaleVisible) {
+        map.removeControl(map.scaleControl);
+      }
+      map.scaleControl = $wnd.top.L.control.scale({
+        metric: units == 1,
+        imperial: units == 2,
+        position: 'bottomright'
+      });
+      if (scaleVisible) {
+        map.scaleControl.addTo(map);
       }
     }
   }-*/;
